@@ -207,33 +207,47 @@ class DLPipeline:
             .alias("label")
         )
 
-        df_np = featured_df.to_numpy()
-        datetime_col = featured_df["datetime"].to_list()
-        col_map = {col: i for i, col in enumerate(featured_df.columns)}
-
-        seq_indices = [col_map[c] for c in self.seq_cols]
-        feature_indices = [col_map[c] for c in self.feature_cols if c in col_map]
-
         entry_times = set(entry_labels["entry_time"].to_list())
         entry_label_map = dict(zip(
             entry_labels["entry_time"].to_list(),
             entry_labels["label"].to_list(),
         ))
 
+        datetime_col = featured_df["datetime"].to_list()
+        target_indices = []
+        target_labels = []
+        for i in range(self.sequence_length, len(datetime_col)):
+            if datetime_col[i] in entry_times:
+                target_indices.append(i)
+                target_labels.append(entry_label_map[datetime_col[i]])
+
+        if not target_indices:
+            return np.array([]), np.array([]), np.array([])
+
+        seq_df = featured_df.select(self.seq_cols)
+        feat_df = featured_df.select([c for c in self.feature_cols if c in featured_df.columns])
+
         sequences = []
         features = []
         labels = []
 
-        for i in range(self.sequence_length, len(df_np)):
-            current_time = datetime_col[i]
-            if current_time in entry_times:
-                seq = df_np[i - self.sequence_length:i, :][:, seq_indices]
-                feat = df_np[i, feature_indices]
+        batch_size = 1000
+        for batch_start in range(0, len(target_indices), batch_size):
+            batch_end = min(batch_start + batch_size, len(target_indices))
+            batch_indices = target_indices[batch_start:batch_end]
+            batch_labels = target_labels[batch_start:batch_end]
+
+            for idx, label in zip(batch_indices, batch_labels):
+                seq_slice = seq_df.slice(idx - self.sequence_length, self.sequence_length)
+                seq = seq_slice.to_numpy()
+
+                feat_slice = feat_df.row(idx)
+                feat = np.array(feat_slice)
 
                 if not np.isnan(seq).any() and not np.isnan(feat).any():
                     sequences.append(seq)
                     features.append(feat)
-                    labels.append(entry_label_map[current_time])
+                    labels.append(label)
 
         return np.array(sequences), np.array(features), np.array(labels)
 

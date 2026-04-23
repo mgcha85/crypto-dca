@@ -392,6 +392,59 @@ def generate_report_html(
     return str(output_path)
 
 
+class ReportGenerator:
+    def __init__(self, output_dir: str | Path = "docs"):
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def create_trade_chart(
+        self,
+        df: pl.DataFrame,
+        trades_df: pl.DataFrame,
+        symbol: str,
+        timeframe: str,
+        metrics: dict,
+    ) -> str:
+        if trades_df.is_empty():
+            return ""
+
+        position_ids = trades_df["position_id"].unique().to_list()[:3]
+
+        try:
+            chart = create_trade_chart(
+                df, trades_df, position_ids,
+                f"{symbol} {timeframe} - Sample Trades",
+            )
+        except Exception:
+            return ""
+
+        html = generate_report_html(
+            symbol=symbol,
+            timeframe=timeframe,
+            backtest_results=metrics,
+            trades_df=trades_df,
+            df=df,
+            output_dir=self.output_dir,
+        )
+        return html
+
+    def create_index_page(self, all_results: dict) -> str:
+        results_flat = {}
+
+        for symbol, tf_results in all_results.items():
+            for tf, result in tf_results.items():
+                if result is None:
+                    continue
+                key = f"{symbol.lower()}_{tf}"
+                results_flat[key] = {
+                    "backtest": result["metrics"],
+                    "ml": result.get("ml"),
+                    "dl": result.get("dl"),
+                }
+
+        return generate_index_html(results_flat, self.output_dir)
+
+
 def generate_index_html(
     results: dict,
     output_dir: str | Path = "docs",

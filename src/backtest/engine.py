@@ -184,8 +184,6 @@ class MultiBandDCABacktester:
         equity_history = []
         position_counter = 0
 
-        split_capital = self.initial_capital * (self.position_size_pct / 100)
-
         for i in range(self.bb_period, len(df)):
             current_time = datetimes[i]
             current_price = closes[i]
@@ -222,7 +220,9 @@ class MultiBandDCABacktester:
 
             if current_position is not None:
                 if self._can_add_entry(current_position, current_price):
-                    if capital >= split_capital:
+                    remaining_entries = self.n_splits - current_position.num_entries
+                    if remaining_entries > 0:
+                        split_capital = capital / remaining_entries
                         qty = split_capital / current_price
                         capital -= split_capital
                         current_position.entries.append(
@@ -236,8 +236,9 @@ class MultiBandDCABacktester:
                         current_position.target_exit_price = exit_price
 
             if current_position is None and current_price <= entry_price:
-                if capital >= split_capital:
+                if capital > 0:
                     position_counter += 1
+                    split_capital = capital / self.n_splits
                     qty = split_capital / current_price
                     capital -= split_capital
                     current_position = Position(
