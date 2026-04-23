@@ -296,3 +296,166 @@ class MultiBandDCABacktester:
                     "status": pos.status.value,
                 })
         return pl.DataFrame(records)
+
+
+class MLFilteredBacktester(MultiBandDCABacktester):
+    def __init__(
+        self,
+        model,
+        seq_scaler,
+        feature_scaler,
+        seq_cols: list[str],
+        feature_cols: list[str],
+        sequence_length: int = 100,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.model = model.cpu()
+        self.seq_scaler = seq_scaler
+        self.feature_scaler = feature_scaler
+        self.seq_cols = seq_cols
+        self.feature_cols = feature_cols
+        self.sequence_length = sequence_length
+        self.model.eval()
+
+    def run_with_filter(
+        self,
+        df: pl.DataFrame,
+        featured_df: pl.DataFrame,
+    ) -> BacktestResult:
+        import torch
+
+        df = self._prepare_data(df)
+
+        datetimes = df["datetime"].to_list()
+        closes = df["close"].to_numpy()
+        entry_bands = df["entry_band"].to_numpy()
+        exit_bands = df["exit_band"].to_numpy()
+
+        seq_df = featured_df.select(self.seq_cols)
+        feat_df = featured_df.select([c for c in self.feature_cols if c in featured_df.columns])
+
+        capital = self.initial_capital
+        positions: list[Position] = []
+        current_position: Optional[Position] = None
+        equity_history = []
+        position_counter = 0
+        filtered_count = 0
+
+        min_start = max(self.bb_period, self.sequence_length, 400)
+
+        for i in range(min_start, len(df)):
+            current_time = datetimes[i]
+            current_price = closes[i]
+            entry_price = entry_bands[i]
+            exit_price = exit_bands[i]
+
+            if np.isnan(entry_price) or np.isnan(exit_price):
+                equity_history.append(capital)
+                continue
+
+            if current_position is not None:
+                days_held = (current_time - current_position.first_entry_time).total_seconds() / 86400
+                if days_held >= self.max_hold_days:
+                    current_position.exit_time = current_time
+                    current_position.exit_price = current_price
+                    current_position.exit_idx = i
+                    current_position.status = PositionStatus.EXPIRED
+                    capital += current_position.total_quantity * current_price
+                    positions.append(current_position)
+                    current_position = None
+
+            if current_position is not None:
+                if current_price >= current_position.target_exit_price:
+                    current_position.exit_time = current_time
+                    current_position.exit_price = current_price
+                    current_position.exit_idx = i
+                    if current_price >= current_position.avg_entry_price:
+                        current_position.status = PositionStatus.CLOSED_PROFIT
+                    else:
+                        current_position.status = PositionStatus.CLOSED_LOSS
+                    capital += current_position.total_quantity * current_price
+                    positions.append(current_position)
+                    current_position = None
+
+            if current_position is not None:
+                if self._can_add_entry(current_position, current_price):
+                    remaining_entries = self.n_splits - current_position.num_entries
+                    if remaining_entries > 0:
+                        split_capital = capital / remaining_entries
+                        qty = split_capital / current_price
+                        capital -= split_capital
+                        current_position.entries.append(
+                            TradeEntry(
+                                entry_time=current_time,
+                                entry_price=current_price,
+                                quantity=qty,
+                                entry_idx=i,
+                            )
+                        )
+                        current_position.target_exit_price = exit_price
+
+            if current_position is None and current_price <= entry_price:
+                if capital > 0:
+                    seq = seq_df.slice(i - self.sequence_length, self.sequence_length).to_numpy()
+                    feat = np.array(feat_df.row(i))
+
+                    if np.isnan(seq).any() or np.isnan(feat).any():
+                        equity_history.append(capital)
+                        continue
+
+                    seq_flat = seq.reshape(-1, seq.shape[-1])
+                    seq_scaled = self.seq_scaler.transform(seq_flat).reshape(1, seq.shape[0], seq.shape[1])
+                    feat_scaled = self.feature_scaler.transform(feat.reshape(1, -1))
+
+                    with torch.no_grad():
+                        seq_tensor = torch.FloatTensor(seq_scaled)
+                        feat_tensor = torch.FloatTensor(feat_scaled)
+                        output = self.model(seq_tensor, feat_tensor)
+                        pred = output.argmax(dim=1).item()
+
+                    if pred == 1:
+                        position_counter += 1
+                        split_capital = capital / self.n_splits
+                        qty = split_capital / current_price
+                        capital -= split_capital
+                        current_position = Position(
+                            id=position_counter,
+                            entries=[
+                                TradeEntry(
+                                    entry_time=current_time,
+                                    entry_price=current_price,
+                                    quantity=qty,
+                                    entry_idx=i,
+                                )
+                            ],
+                            target_exit_price=exit_price,
+                        )
+                    else:
+                        filtered_count += 1
+
+            position_value = 0.0
+            if current_position is not None:
+                position_value = current_position.total_quantity * current_price
+
+            equity_history.append(capital + position_value)
+
+        if current_position is not None:
+            final_price = closes[-1]
+            current_position.exit_time = datetimes[-1]
+            current_position.exit_price = final_price
+            current_position.exit_idx = len(df) - 1
+            current_position.status = PositionStatus.OPEN
+            capital += current_position.total_quantity * final_price
+            positions.append(current_position)
+
+        print(f"  ML filtered {filtered_count} bad entries")
+
+        equity_curve = pl.Series("equity", equity_history)
+
+        return BacktestResult(
+            positions=positions,
+            equity_curve=equity_curve,
+            initial_capital=self.initial_capital,
+            final_capital=capital,
+        )

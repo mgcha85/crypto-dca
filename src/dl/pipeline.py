@@ -216,7 +216,8 @@ class DLPipeline:
         datetime_col = featured_df["datetime"].to_list()
         target_indices = []
         target_labels = []
-        for i in range(self.sequence_length, len(datetime_col)):
+        min_start = max(self.sequence_length, 400)
+        for i in range(min_start, len(datetime_col)):
             if datetime_col[i] in entry_times:
                 target_indices.append(i)
                 target_labels.append(entry_label_map[datetime_col[i]])
@@ -298,10 +299,15 @@ class DLPipeline:
         model: nn.Module,
         train_loader: DataLoader,
         val_loader: DataLoader,
+        class_weights: torch.Tensor | None = None,
     ) -> tuple[nn.Module, list[float], list[float], int]:
         model = model.to(self.device)
         optimizer = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
-        criterion = nn.CrossEntropyLoss()
+        
+        if class_weights is not None:
+            criterion = nn.CrossEntropyLoss(weight=class_weights.to(self.device))
+        else:
+            criterion = nn.CrossEntropyLoss()
 
         train_losses = []
         val_losses = []
@@ -404,6 +410,11 @@ class DLPipeline:
         train_loader, val_loader, test_loader = self.create_dataloaders(sequences, features, labels)
         print(f"Train: {len(train_loader.dataset)}, Val: {len(val_loader.dataset)}, Test: {len(test_loader.dataset)}")
 
+        neg_count = len(labels) - labels.sum()
+        pos_count = labels.sum()
+        class_weights = torch.FloatTensor([pos_count / len(labels), neg_count / len(labels)])
+        print(f"Class weights: {class_weights.tolist()}")
+
         if model_type == "lstm":
             model = LSTMModel(
                 seq_features=sequences.shape[2],
@@ -426,7 +437,9 @@ class DLPipeline:
             raise ValueError(f"Unknown model type: {model_type}")
 
         print(f"\nTraining {model_type}...")
-        model, train_losses, val_losses, epochs_trained = self.train_model(model, train_loader, val_loader)
+        model, train_losses, val_losses, epochs_trained = self.train_model(
+            model, train_loader, val_loader, class_weights
+        )
 
         accuracy, f1 = self.evaluate_model(model, test_loader)
         print(f"Test Accuracy: {accuracy:.4f}, F1: {f1:.4f}")
