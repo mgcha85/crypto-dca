@@ -1,0 +1,85 @@
+# Multi-Band DCA Strategy Configuration
+
+data:
+  base_path: /mnt/data/finance/cryptocurrency
+  default_symbol: BTCUSDT
+  base_timeframe: 1m  # Raw data timeframe
+
+strategy:
+  # Bollinger Band parameters (parametric study targets)
+  bb_period: 20
+  bb_entry_sigma: -2.5  # Entry when price < lower band (-2.5 sigma)
+  bb_exit_sigma: 0.7    # Exit when price > upper band (+0.7 sigma)
+  
+  # DCA parameters (parametric study targets)
+  n_splits: 3           # Number of averaging positions
+  avg_down_pct: 10.0    # Average down every -10% from avg price (first entry -5%)
+  
+  # Position management
+  max_hold_days: 60     # 2-month expiry
+  stop_loss: null       # No stop loss per requirement
+  
+  # Capital allocation
+  initial_capital: 10000.0
+  position_size_pct: 10.0  # % of capital per split
+
+timeframes:
+  # Analysis timeframes (resample from 1m)
+  primary: [5m, 15m, 1h]
+  feature_tfs: [15m, 1h, 4h]  # For multi-TF features
+
+features:
+  # Moving averages for distance calculation
+  ma_periods: [25, 50, 100, 200, 400]
+  
+  # RSI
+  rsi_period: 14
+  
+  # Bollinger Bands for features
+  bb_period: 20
+  bb_std: 2.0  # Standard +/- 2 sigma for feature calculation
+
+ml:
+  # Label definition
+  hold_days_threshold: 5  # >5 days = negative, <=5 days = positive
+  
+  # Data handling
+  test_size: 0.2
+  val_size: 0.1
+  random_state: 42
+  
+  # Imbalanced data
+  undersample: true
+  undersample_strategy: random
+
+dl:
+  # Sequence parameters
+  sequence_length: 100  # 100 candles lookback
+  
+  # Model parameters
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.2
+  
+  # Training
+  batch_size: 64
+  epochs: 100
+  learning_rate: 0.001
+  early_stopping_patience: 10
+
+optimization:
+  # Parametric study ranges
+  param_ranges:
+    bb_entry_sigma: [-3.5, -1.5]
+    bb_exit_sigma: [0.3, 1.5]
+    n_splits: [2, 5]
+    avg_down_pct: [5.0, 20.0]
+  
+  # Optimization settings
+  n_trials: 100
+  metric: sharpe_ratio  # or total_return, win_rate
+
+output:
+  results_dir: ./results
+  docs_dir: ./docs
+  models_dir: ./models
