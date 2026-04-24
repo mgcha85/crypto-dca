@@ -111,6 +111,8 @@ class BacktestResult:
     @property
     def max_drawdown_pct(self) -> float:
         equity_arr = self.equity_curve.to_numpy()
+        if len(equity_arr) == 0:
+            return 0.0
         peak = np.maximum.accumulate(equity_arr)
         drawdown = (equity_arr - peak) / peak * 100
         return float(np.min(drawdown))

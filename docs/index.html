@@ -221,6 +221,26 @@
     </div>
 
     <div class="card">
+        <h2>Walk-Forward Cross-Validation</h2>
+        <p>Monthly out-of-sample testing with expanding training window (2021-01 ~ 2026-04)</p>
+        <div class="summary-grid">
+            <div class="summary-item">
+                <div class="summary-value negative">-45.0%</div>
+                <div class="summary-label">No Filter<br>Cumulative (64 months)</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-value positive">+69.8%</div>
+                <div class="summary-label">With LSTM<br>Cumulative (64 months)</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-value">27/64</div>
+                <div class="summary-label">Months LSTM<br>Outperformed</div>
+            </div>
+        </div>
+        <p><a href="btcusdt_monthly_cv.html">View BTCUSDT Monthly Results →</a></p>
+    </div>
+
+    <div class="card">
         <h2>Insights</h2>
         <ul>
             <li><strong>1h timeframe benefits most from LSTM filter</strong> - All 4 coins showed improvement at 1h</li>
